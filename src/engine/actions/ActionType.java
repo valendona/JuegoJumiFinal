@@ -1,0 +1,17 @@
+package engine.actions;
+
+
+public enum ActionType {
+    DIE,
+    PLAYER_HIT,
+    EXPLODE_IN_FRAGMENTS,
+    GO_INSIDE,
+    MOVE,
+    NO_MOVE,
+    MOVE_REBOUND_IN_EAST,
+    MOVE_REBOUND_IN_WEST,
+    MOVE_REBOUND_IN_NORTH,
+    MOVE_REBOUND_IN_SOUTH,
+    SPAWN_BODY,
+    SPAWN_PROJECTILE, MOVE_TO_CENTER,
+}
