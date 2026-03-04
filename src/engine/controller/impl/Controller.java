@@ -523,6 +523,13 @@ public class Controller implements WorldManager, DomainEventProcessor {
     }
 
     @Override
+    public void showVictory() {
+        this.engineState = EngineState.PAUSED;
+        if (this.model != null) this.model.pause();
+        this.view.showVictory(this.view.getScore());
+    }
+
+    @Override
     public void notifyPlayerIsDead(String entityId) {
         // Explosión grande en la última posición conocida del jugador
         spawnExplosion(lastPlayerPosX, lastPlayerPosY, 220.0, 1.2);

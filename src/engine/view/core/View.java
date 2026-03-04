@@ -294,6 +294,10 @@ public class View extends JFrame implements KeyListener, WindowFocusListener {
         this.renderer.protectBossRenderable(oldId, newId);
     }
 
+    public void showVictory(int score) {
+        this.renderer.showVictory(score);
+    }
+
     public void notifyPlayerIsDead(String entityId) {
         this.renderer.notifyPlayerIsDead(this.renderer.currentWave);
         this.setLocalPlayer(null);
@@ -546,6 +550,22 @@ public class View extends JFrame implements KeyListener, WindowFocusListener {
                 if (action == engine.view.hud.impl.GameOverHUD.Action.EXIT) {
                     System.exit(0);
                 } else if (action == engine.view.hud.impl.GameOverHUD.Action.RETRY) {
+                    if (this.controller != null) this.controller.engineStop();
+                    this.dispose();
+                    if (this.restartCallback != null) {
+                        new Thread(this.restartCallback, "RestartThread").start();
+                    }
+                }
+                return;
+            }
+
+            // Victory HUD consume el input mientras está activo
+            if (this.renderer.getVictoryHUD().isActive()) {
+                engine.view.hud.impl.VictoryHUD.Action action =
+                        this.renderer.getVictoryHUD().handleKey(keyCode);
+                if (action == engine.view.hud.impl.VictoryHUD.Action.EXIT) {
+                    System.exit(0);
+                } else if (action == engine.view.hud.impl.VictoryHUD.Action.RETRY) {
                     if (this.controller != null) this.controller.engineStop();
                     this.dispose();
                     if (this.restartCallback != null) {

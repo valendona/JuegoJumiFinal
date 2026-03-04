@@ -113,4 +113,7 @@ public interface WorldManager {
          * esté listo — evita el parpadeo entre muerte y re-spawn del boss.
          */
         public void protectBossRenderable(String oldId, String newId);
+
+        /** Muestra la pantalla de victoria al derrotar al boss final. */
+        public void showVictory();
 }

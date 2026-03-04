@@ -1,6 +1,10 @@
 package gameai;
 
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.Random;
 import java.util.Set;
 
@@ -9,58 +13,52 @@ import engine.generators.AbstractIAGenerator;
 import engine.world.ports.WorldDefinition;
 
 /**
- * AIBasicSpawner — Naves enemigas que persiguen al jugador por oleadas.
- *
- * Cada oleada spawna N naves desde los bordes. En cada tick la IA
- * aplica thrust a cada nave viva en dirección al jugador (seguimiento).
- * Cuando las naves van demasiado rápido, aplican freno para mantener
- * una velocidad controlada, haciendo el gameplay más desafiante.
- * La oleada avanza solo cuando todas las naves enemigas son destruidas.
+ * Gestiona las oleadas de enemigos: spawna naves desde los bordes,
+ * las dirige hacia el jugador cada tick y avanza la oleada cuando
+ * todas las naves son destruidas. En oleadas especiales (5 y 10)
+ * aparece un miniboss y un boss con sistema de HP múltiple.
  */
 public class AIBasicSpawner extends AbstractIAGenerator {
 
-    // region Constantes
-    private static final double WORLD_SIZE          = 4500d;
+    // --- Mundo ---
+    private static final double WORLD_SIZE = 4500d;
 
-    // Enemigos normales
-    private static final double BASE_SPEED          = 200d;
-    private static final double SPEED_INCREMENT     = 35d;
-    private static final int    WAVE_SIZE_START     = 2;
-    private static final int    WAVE_SIZE_INCREMENT = 2; // usado solo en normal (dificultad 2)
-    private static final long   BETWEEN_SPAWN_MS    = 900L;
-    private static final long   BETWEEN_WAVES_MS    = 2000L;
-    private static final double ENEMY_THRUST        = 950d;
-    private static final double ENEMY_SIZE          = 60d;
-    private static final long   STEER_INTERVAL_MS   = 16L;
-    private static final int    SCORE_PER_KILL       = 100;
-    private static final double MAX_SPEED_MULT      = 1.35;
-    private static final double BRAKE_FORCE         = 500d;
-    private static final String ENEMY_ASSET         = "spaceship_03";
+    // --- Enemigos normales ---
+    private static final double BASE_SPEED      = 200d;
+    private static final double SPEED_INCREMENT = 35d;
+    private static final int    WAVE_SIZE_START = 2;
+    private static final long   BETWEEN_SPAWN_MS  = 900L;
+    private static final long   BETWEEN_WAVES_MS  = 2000L;
+    private static final double ENEMY_THRUST    = 950d;
+    private static final double ENEMY_SIZE      = 60d;
+    private static final long   STEER_INTERVAL_MS = 16L;
+    private static final int    SCORE_PER_KILL  = 100;
+    private static final double MAX_SPEED_MULT  = 1.35;
+    private static final double BRAKE_FORCE     = 500d;
+    private static final String ENEMY_ASSET     = "spaceship_03";
 
-    // Miniboss (oleada 5)
-    private static final int    MINIBOSS_WAVE       = 5;
-    private static final double MINIBOSS_SIZE       = 120d;
-    private static final double MINIBOSS_SPEED      = 160d;
-    private static final double MINIBOSS_THRUST     = 1200d;
-    private static final double MINIBOSS_BRAKE      = 700d;
-    private static final String MINIBOSS_ASSET      = "spaceship_07";
-    private static final int    SCORE_MINIBOSS      = 1000;
-    private static final int    MINIBOSS_HP         = 15;
+    // --- Miniboss (oleada 5) ---
+    private static final int    MINIBOSS_WAVE  = 5;
+    private static final double MINIBOSS_SIZE  = 120d;
+    private static final double MINIBOSS_SPEED = 160d;
+    private static final double MINIBOSS_THRUST= 1200d;
+    private static final double MINIBOSS_BRAKE = 700d;
+    private static final String MINIBOSS_ASSET = "spaceship_07";
+    private static final int    SCORE_MINIBOSS = 1000;
+    private static final int    MINIBOSS_HP    = 15;
 
-    // Boss (oleada 10)
-    private static final int    BOSS_WAVE           = 10;
-    private static final double BOSS_SIZE           = 200d;
-    private static final double BOSS_SPEED          = 120d;
-    private static final double BOSS_THRUST         = 1600d;
-    private static final double BOSS_BRAKE          = 900d;
-    private static final String BOSS_ASSET          = "spaceship_06";
-    private static final int    SCORE_BOSS          = 5000;
-    private static final int    BOSS_HP             = 30;
-    // endregion
+    // --- Boss final (oleada 10) ---
+    private static final int    BOSS_WAVE  = 10;
+    private static final double BOSS_SIZE  = 200d;
+    private static final double BOSS_SPEED = 120d;
+    private static final double BOSS_THRUST= 1600d;
+    private static final double BOSS_BRAKE = 900d;
+    private static final String BOSS_ASSET = "spaceship_06";
+    private static final int    SCORE_BOSS = 5000;
+    private static final int    BOSS_HP    = 30;
 
     private enum WaveState { SPAWNING, WAITING_CLEAR, PAUSING }
 
-    // region Fields
     private final Random rnd = new Random();
 
     private int       difficulty      = 2;
@@ -72,26 +70,16 @@ public class AIBasicSpawner extends AbstractIAGenerator {
     private long      lastActionTime  = 0L;
     private long      lastSteerTime   = 0L;
 
-    // Buffers reutilizables para enviar posiciones al renderer
     private double[] posXBuf = new double[64];
     private double[] posYBuf = new double[64];
 
-    private final Set<String> activeEnemyIds = new LinkedHashSet<>();
-    /** Última posición conocida de cada enemigo vivo, actualizada cada tick */
-    private final java.util.Map<String, double[]> lastKnownPos = new java.util.HashMap<>();
-    /** ID del boss/miniboss actual si hay uno vivo */
-    private String bossId = null;
+    private final Set<String>         activeEnemyIds = new LinkedHashSet<>();
+    private final Map<String, double[]> lastKnownPos = new HashMap<>();
 
-    // HP actual del boss/miniboss (solo válido cuando bossId != null)
-    private int bossHpCurrent = 0;
-    private int bossHpMax     = 0;
-    /** Último conteo de activos del boss para detectar golpes (el boss recibe un golpe cuando
-     *  el motor lo "mata" y nosotros lo revivimos con HP reducido). Como el motor no tiene
-     *  HP parcial para enemigos usamos un tick de detección por colisión de proyectil. */
-    private final java.util.Map<String, Integer> enemyHitCount = new java.util.HashMap<>();
-    // endregion
+    private String bossId        = null;
+    private int    bossHpCurrent = 0;
+    private int    bossHpMax     = 0;
 
-    /** Referencia a las reglas de juego para registrar inmunidad de boss a obstáculos */
     private gamerules.AsteroidSurvivor gameRules = null;
 
     public AIBasicSpawner(WorldManager worldEvolver, WorldDefinition worldDefinition, int maxCreationDelay) {
@@ -107,9 +95,6 @@ public class AIBasicSpawner extends AbstractIAGenerator {
     @Override
     protected String getThreadName() { return "AIBasicSpawner"; }
 
-    /** Establece la dificultad (1=fácil, 2=normal, 3=difícil). */
-    public void setDifficulty(int d) { this.difficulty = Math.max(1, Math.min(3, d)); }
-
     @Override
     protected void onActivate() {
         this.lastActionTime = System.currentTimeMillis();
@@ -122,8 +107,8 @@ public class AIBasicSpawner extends AbstractIAGenerator {
         if (this.worldEvolver.isIntroActive()) return;
 
         if (!difficultySet) {
-            this.difficulty    = this.worldEvolver.getIntroDifficulty();
-            this.difficultySet = true;
+            difficulty    = this.worldEvolver.getIntroDifficulty();
+            difficultySet = true;
         }
 
         sendEnemyPositions();
@@ -148,7 +133,6 @@ public class AIBasicSpawner extends AbstractIAGenerator {
                     id = spawnMiniboss();
                     bossId = id;
                 } else if (isBossWave || isMinibossWave) {
-                    // En oleadas especiales solo 1 enemigo (el jefe)
                     waveState = WaveState.WAITING_CLEAR;
                     return;
                 } else {
@@ -158,21 +142,16 @@ public class AIBasicSpawner extends AbstractIAGenerator {
                 if (id != null) activeEnemyIds.add(id);
                 spawnedInWave++;
                 lastActionTime = now;
-                if (spawnedInWave >= enemiesThisWave) {
-                    waveState = WaveState.WAITING_CLEAR;
-                }
+                if (spawnedInWave >= enemiesThisWave) waveState = WaveState.WAITING_CLEAR;
             }
 
             case WAITING_CLEAR -> {
                 if (activeEnemyIds.isEmpty()) {
                     bossId = null;
                     currentWave++;
-                    // Oleadas de jefes: solo 1 enemigo
-                    if (currentWave == MINIBOSS_WAVE || currentWave == BOSS_WAVE) {
-                        enemiesThisWave = 1;
-                    } else {
-                        enemiesThisWave = WAVE_SIZE_START + (currentWave - 1) * waveSizeIncrement();
-                    }
+                    enemiesThisWave = (currentWave == MINIBOSS_WAVE || currentWave == BOSS_WAVE)
+                            ? 1
+                            : WAVE_SIZE_START + (currentWave - 1) * difficulty;
                     spawnedInWave  = 0;
                     waveState      = WaveState.PAUSING;
                     lastActionTime = now;
@@ -192,24 +171,18 @@ public class AIBasicSpawner extends AbstractIAGenerator {
         }
     }
 
-    // *** PRIVATE ***
+    // ---- Lógica interna ----
 
-    /** Devuelve cuántos enemigos se añaden por oleada según la dificultad:
-     *  fácil=1, normal=2, difícil=3. */
-    private int waveSizeIncrement() {
-        return difficulty; // 1 → fácil, 2 → normal, 3 → difícil
-    }
-
+    /** Velocidad base de los enemigos normales escalada por oleada y dificultad. */
     private double currentSpeed() {
-        double diffMult = 0.7 + (difficulty - 1) * 0.3;
-        return (BASE_SPEED + (currentWave - 1) * SPEED_INCREMENT) * diffMult;
+        return (BASE_SPEED + (currentWave - 1) * SPEED_INCREMENT) * (0.7 + (difficulty - 1) * 0.3);
     }
 
     private boolean isBossId(String id) { return id != null && id.equals(bossId); }
 
+    /** Dirige cada nave hacia el jugador; aplica freno si supera la velocidad máxima. */
     private void steerEnemies(long now) {
-        if (activeEnemyIds.isEmpty()) return;
-        if (now - lastSteerTime < STEER_INTERVAL_MS) return;
+        if (activeEnemyIds.isEmpty() || now - lastSteerTime < STEER_INTERVAL_MS) return;
         lastSteerTime = now;
 
         String playerId = this.worldEvolver.getLocalPlayerId();
@@ -220,21 +193,19 @@ public class AIBasicSpawner extends AbstractIAGenerator {
         double normalMaxSpeed = currentSpeed() * MAX_SPEED_MULT;
 
         for (String enemyId : activeEnemyIds) {
-            double speed = this.worldEvolver.getBodySpeed(enemyId);
-            boolean isBoss = isBossId(enemyId);
+            boolean isBoss  = isBossId(enemyId);
+            double maxSpd   = isBoss ? (currentWave == BOSS_WAVE ? BOSS_SPEED  : MINIBOSS_SPEED)  * 1.3 : normalMaxSpeed;
+            double thrust   = isBoss ? (currentWave == BOSS_WAVE ? BOSS_THRUST : MINIBOSS_THRUST)       : ENEMY_THRUST;
+            double brake    = isBoss ? (currentWave == BOSS_WAVE ? BOSS_BRAKE  : MINIBOSS_BRAKE)        : BRAKE_FORCE;
 
-            double maxSpd   = isBoss ? (currentWave == BOSS_WAVE ? BOSS_SPEED     : MINIBOSS_SPEED)     * 1.3 : normalMaxSpeed;
-            double thrust   = isBoss ? (currentWave == BOSS_WAVE ? BOSS_THRUST    : MINIBOSS_THRUST)         : ENEMY_THRUST;
-            double brake    = isBoss ? (currentWave == BOSS_WAVE ? BOSS_BRAKE     : MINIBOSS_BRAKE)          : BRAKE_FORCE;
-
-            if (speed > maxSpd) {
+            if (this.worldEvolver.getBodySpeed(enemyId) > maxSpd)
                 this.worldEvolver.brakeBody(enemyId, brake * 0.6);
-            } else {
+            else
                 this.worldEvolver.steerBodyToward(enemyId, pos[0], pos[1], thrust);
-            }
         }
     }
 
+    /** Actualiza el buffer de posiciones de enemigos y lo envía al renderer para las flechas. */
     private void sendEnemyPositions() {
         int n = activeEnemyIds.size();
         if (posXBuf.length < n) { posXBuf = new double[n + 8]; posYBuf = new double[n + 8]; }
@@ -251,9 +222,14 @@ public class AIBasicSpawner extends AbstractIAGenerator {
         this.worldEvolver.setEnemyPositions(posXBuf, posYBuf, i);
     }
 
+    /**
+     * Detecta enemigos muertos y los elimina de la lista activa.
+     * Para el boss: aplica daño al HP y lo re-spawna si aún tiene vida,
+     * o lo elimina definitivamente al llegar a 0. Suma puntuación en ambos casos.
+     */
     private void pruneDeadEnemies() {
-        java.util.List<double[]> explosions = new java.util.ArrayList<>();
-        java.util.List<String>   toRemove   = new java.util.ArrayList<>();
+        List<double[]> explosions = new ArrayList<>();
+        List<String>   toRemove   = new ArrayList<>();
         int bonusScore = 0;
 
         for (String id : activeEnemyIds) {
@@ -261,39 +237,33 @@ public class AIBasicSpawner extends AbstractIAGenerator {
 
             double[] pos = lastKnownPos.get(id);
 
-            // ¿Es el boss/miniboss?
             if (id.equals(bossId)) {
                 boolean isBossWave = (currentWave == BOSS_WAVE);
-                // Consumir daño acumulado; clampear a máx 2 por hit para evitar
-                // que misiles con thrust generen múltiples colisiones en el mismo impacto
-                int rawDmg = this.worldEvolver.pollBossDamage();
-                int dmg = Math.min(2, Math.max(1, rawDmg));
+                // Clampear a máx 2 para evitar que misiles propulsados generen múltiples hits
+                int dmg = Math.min(2, Math.max(1, this.worldEvolver.pollBossDamage()));
                 bossHpCurrent = Math.max(0, bossHpCurrent - dmg);
 
                 if (bossHpCurrent > 0) {
-                    // Aún tiene HP → explosión de impacto y re-spawn
                     this.worldEvolver.setBossHealth(bossHpCurrent, bossHpMax, isBossWave);
-                    if (pos != null) {
-                        this.worldEvolver.spawnExplosion(pos[0], pos[1],
-                                isBossWave ? 100.0 : 70.0, 0.5);
-                    }
-                    double spawnX   = pos != null ? pos[0] : WORLD_SIZE / 2.0;
-                    double spawnY   = pos != null ? pos[1] : WORLD_SIZE / 2.0;
-                    String asset    = isBossWave ? BOSS_ASSET  : MINIBOSS_ASSET;
-                    double size     = isBossWave ? BOSS_SIZE   : MINIBOSS_SIZE;
-                    double speed    = isBossWave ? BOSS_SPEED  : MINIBOSS_SPEED;
+                    if (pos != null)
+                        this.worldEvolver.spawnExplosion(pos[0], pos[1], isBossWave ? 100.0 : 70.0, 0.5);
+
+                    double spawnX = pos != null ? pos[0] : WORLD_SIZE / 2.0;
+                    double spawnY = pos != null ? pos[1] : WORLD_SIZE / 2.0;
+                    double speed  = isBossWave ? BOSS_SPEED : MINIBOSS_SPEED;
                     double diffMult = 0.7 + (difficulty - 1) * 0.3;
-                    double cx = WORLD_SIZE / 2.0, cy = WORLD_SIZE / 2.0;
-                    double dx = cx - spawnX, dy = cy - spawnY;
+                    double dx = WORLD_SIZE / 2.0 - spawnX, dy = WORLD_SIZE / 2.0 - spawnY;
                     double len = Math.sqrt(dx * dx + dy * dy);
                     if (len < 1) { dx = 1; dy = 0; len = 1; }
-                    double vx    = dx / len * speed * diffMult;
-                    double vy    = dy / len * speed * diffMult;
-                    double angle = Math.toDegrees(Math.atan2(dy, dx));
+
                     String newId = this.worldEvolver.addDynamicBodyAndGetId(
-                            asset, size, spawnX, spawnY, vx, vy, 0, 0, angle, 0, 0, 0);
+                            isBossWave ? BOSS_ASSET : MINIBOSS_ASSET,
+                            isBossWave ? BOSS_SIZE  : MINIBOSS_SIZE,
+                            spawnX, spawnY,
+                            dx / len * speed * diffMult, dy / len * speed * diffMult,
+                            0, 0, Math.toDegrees(Math.atan2(dy, dx)), 0, 0, 0);
+
                     if (newId != null) {
-                        // Proteger renderable viejo hasta que el nuevo esté listo → sin parpadeo
                         this.worldEvolver.protectBossRenderable(id, newId);
                         activeEnemyIds.add(newId);
                         if (gameRules != null) { gameRules.unregisterBoss(id); gameRules.registerBoss(newId); }
@@ -305,36 +275,43 @@ public class AIBasicSpawner extends AbstractIAGenerator {
                     continue;
                 }
 
-                // HP llegó a 0 → muere definitivamente
                 bonusScore += isBossWave ? SCORE_BOSS : SCORE_MINIBOSS;
                 if (gameRules != null) gameRules.unregisterBoss(id);
                 bossId        = null;
                 bossHpCurrent = 0;
                 this.worldEvolver.clearBossHealth();
+
+                // Victoria: el boss final ha sido derrotado
+                if (isBossWave) {
+                    if (pos != null)
+                        this.worldEvolver.spawnExplosion(pos[0], pos[1], 300.0, 1.5);
+                    this.worldEvolver.addScore(bonusScore);
+                    this.worldEvolver.showVictory();
+                    this.stop(); // detener el spawner
+                    return;
+                }
             }
 
-            // Muerte definitiva (enemigo normal o boss sin HP)
             if (pos != null) explosions.add(new double[]{pos[0], pos[1]});
             toRemove.add(id);
         }
 
         if (toRemove.isEmpty()) return;
 
-        for (String id : toRemove) { activeEnemyIds.remove(id); lastKnownPos.remove(id); }
+        toRemove.forEach(id -> { activeEnemyIds.remove(id); lastKnownPos.remove(id); });
 
         int normalKills = toRemove.size() - (bonusScore > 0 ? 1 : 0);
-        int normalPts   = Math.max(0, normalKills) * SCORE_PER_KILL * currentWave * difficulty;
-        this.worldEvolver.addScore(normalPts + bonusScore);
+        this.worldEvolver.addScore(normalKills * SCORE_PER_KILL * currentWave * difficulty + bonusScore);
 
         for (double[] pos : explosions) {
             boolean wasBoss = bonusScore > 0 && explosions.size() == 1;
-            double expSize  = wasBoss ? (currentWave == BOSS_WAVE ? 300.0 : 200.0) : 140.0;
-            this.worldEvolver.spawnExplosion(pos[0], pos[1], expSize, 1.2);
+            this.worldEvolver.spawnExplosion(pos[0], pos[1],
+                    wasBoss ? (currentWave == BOSS_WAVE ? 300.0 : 200.0) : 140.0, 1.2);
         }
     }
 
-    /** Spawna desde un borde aleatorio apuntando al centro. */
-    private String spawnFromBorder(String assetId, double size, double speed, double angularSpeed) {
+    /** Spawna una nave desde un borde aleatorio apuntando al centro del mundo. */
+    private String spawnFromBorder(String assetId, double size, double speed) {
         double margin = 300d;
         double center = WORLD_SIZE / 2.0;
         int border = rnd.nextInt(4);
@@ -343,26 +320,24 @@ public class AIBasicSpawner extends AbstractIAGenerator {
             case 0  -> { spawnX = margin + rnd.nextDouble() * (WORLD_SIZE - 2*margin); spawnY = margin; }
             case 1  -> { spawnX = margin + rnd.nextDouble() * (WORLD_SIZE - 2*margin); spawnY = WORLD_SIZE - margin; }
             case 2  -> { spawnX = WORLD_SIZE - margin; spawnY = margin + rnd.nextDouble() * (WORLD_SIZE - 2*margin); }
-            default -> { spawnX = margin; spawnY = margin + rnd.nextDouble() * (WORLD_SIZE - 2*margin); }
+            default -> { spawnX = margin;              spawnY = margin + rnd.nextDouble() * (WORLD_SIZE - 2*margin); }
         }
         double dx = center - spawnX, dy = center - spawnY;
         double len = Math.sqrt(dx*dx + dy*dy);
-        double vx = dx / len * speed, vy = dy / len * speed;
-        double angle = Math.toDegrees(Math.atan2(dy, dx));
         return this.worldEvolver.addDynamicBodyAndGetId(
-                assetId, size, spawnX, spawnY, vx, vy, 0, 0, angle, angularSpeed, 0, 0);
+                assetId, size, spawnX, spawnY,
+                dx / len * speed, dy / len * speed,
+                0, 0, Math.toDegrees(Math.atan2(dy, dx)), 0, 0, 0);
     }
 
     private String spawnEnemy() {
-        return spawnFromBorder(ENEMY_ASSET, ENEMY_SIZE, currentSpeed(), 0);
+        return spawnFromBorder(ENEMY_ASSET, ENEMY_SIZE, currentSpeed());
     }
 
     private String spawnMiniboss() {
-        double diffMult = 0.7 + (difficulty - 1) * 0.3;
-        String id = spawnFromBorder(MINIBOSS_ASSET, MINIBOSS_SIZE, MINIBOSS_SPEED * diffMult, 0);
+        String id = spawnFromBorder(MINIBOSS_ASSET, MINIBOSS_SIZE, MINIBOSS_SPEED * (0.7 + (difficulty - 1) * 0.3));
         if (id != null) {
-            bossHpMax     = MINIBOSS_HP;
-            bossHpCurrent = MINIBOSS_HP;
+            bossHpMax = bossHpCurrent = MINIBOSS_HP;
             this.worldEvolver.setBossHealth(bossHpCurrent, bossHpMax, false);
             if (gameRules != null) gameRules.registerBoss(id);
         }
@@ -370,11 +345,9 @@ public class AIBasicSpawner extends AbstractIAGenerator {
     }
 
     private String spawnBoss() {
-        double diffMult = 0.7 + (difficulty - 1) * 0.3;
-        String id = spawnFromBorder(BOSS_ASSET, BOSS_SIZE, BOSS_SPEED * diffMult, 0);
+        String id = spawnFromBorder(BOSS_ASSET, BOSS_SIZE, BOSS_SPEED * (0.7 + (difficulty - 1) * 0.3));
         if (id != null) {
-            bossHpMax     = BOSS_HP;
-            bossHpCurrent = BOSS_HP;
+            bossHpMax = bossHpCurrent = BOSS_HP;
             this.worldEvolver.setBossHealth(bossHpCurrent, bossHpMax, true);
             if (gameRules != null) gameRules.registerBoss(id);
         }

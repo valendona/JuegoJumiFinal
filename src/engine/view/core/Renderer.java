@@ -28,6 +28,7 @@ import engine.view.renderables.impl.ExplosionRenderable;
 import engine.view.renderables.ports.RenderDTO;
 import engine.view.hud.impl.InstrumentationHUD;
 import engine.view.hud.impl.GameOverHUD;
+import engine.view.hud.impl.VictoryHUD;
 import engine.view.hud.impl.IntroHUD;
 import engine.view.hud.impl.PauseHUD;
 import engine.view.hud.impl.PlayerHUD;
@@ -158,6 +159,7 @@ public class Renderer extends Canvas implements Runnable {
     private final InstrumentationHUD instrumentationHUD = new InstrumentationHUD();
     private final IntroHUD introHUD = new IntroHUD();
     private final GameOverHUD gameOverHUD = new GameOverHUD();
+    private final VictoryHUD victoryHUD = new VictoryHUD();
     private final WaveHUD waveHUD = new WaveHUD();
     private final ScoreHUD scoreHUD = new ScoreHUD();
     private final PauseHUD pauseHUD = new PauseHUD();
@@ -344,6 +346,15 @@ public class Renderer extends Canvas implements Runnable {
     /** Expone el GameOverHUD para que View pueda enrutar teclas a él. */
     public GameOverHUD getGameOverHUD() { return this.gameOverHUD; }
 
+    /** Expone el VictoryHUD para que View pueda enrutar teclas a él. */
+    public VictoryHUD getVictoryHUD() { return this.victoryHUD; }
+
+    /** Muestra la pantalla de victoria con fade-in. */
+    public void showVictory(int score) {
+        this.cameraFrozen = true;
+        this.victoryHUD.show(score);
+    }
+
     /** Notifica al renderer que el jugador ha muerto: inicia el delay antes del GameOver. */
     public void notifyPlayerIsDead(int waveReached) {
         this.playerDeathTimeMs = System.currentTimeMillis();
@@ -487,6 +498,12 @@ public class Renderer extends Canvas implements Runnable {
         // Pantalla de Game Over activa
         if (this.gameOverHUD.isActive()) {
             this.gameOverHUD.draw(g, w, h);
+            return;
+        }
+
+        // Pantalla de Victoria activa
+        if (this.victoryHUD.isActive()) {
+            this.victoryHUD.draw(g, w, h);
             return;
         }
 
@@ -1022,6 +1039,13 @@ public class Renderer extends Canvas implements Runnable {
 
             // Pantalla de Game Over: solo dibujar
             if (this.gameOverHUD.isActive()) {
+                this.drawScene(bs);
+                try { Thread.sleep(16); } catch (InterruptedException ex) { throw new RuntimeException(ex); }
+                continue;
+            }
+
+            // Pantalla de Victoria: solo dibujar
+            if (this.victoryHUD.isActive()) {
                 this.drawScene(bs);
                 try { Thread.sleep(16); } catch (InterruptedException ex) { throw new RuntimeException(ex); }
                 continue;

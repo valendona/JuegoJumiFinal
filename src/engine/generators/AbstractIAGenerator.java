@@ -21,6 +21,7 @@ public abstract class AbstractIAGenerator implements Runnable {
     protected final WorldDefinition worldDefinition;
     protected final int maxCreationDelay;
     private Thread thread;
+    private volatile boolean stopped = false;
     // endregion
 
     // region Constructors
@@ -54,6 +55,11 @@ public abstract class AbstractIAGenerator implements Runnable {
         this.onActivate();
 
         System.out.println(this.getThreadName() + " activated!");
+    }
+
+    /** Detiene el generador de forma permanente. */
+    public void stop() {
+        this.stopped = true;
     }
 
     // *** PROTECTED (alphabetical order) ***
@@ -172,7 +178,7 @@ public abstract class AbstractIAGenerator implements Runnable {
     // region Runnable
     @Override
     public final void run() {
-        while (this.worldEvolver.getEngineState() != EngineState.STOPPED) {
+        while (!this.stopped && this.worldEvolver.getEngineState() != EngineState.STOPPED) {
 
             if (this.worldEvolver.getEngineState() == EngineState.ALIVE) {
                 this.onTick();
