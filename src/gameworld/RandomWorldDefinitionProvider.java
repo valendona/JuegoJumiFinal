@@ -35,7 +35,7 @@ public final class RandomWorldDefinitionProvider extends AbstractWorldDefinition
 		// region Dynamic bodies
 		this.registerAsset("spaceship_03");    // enemigo normal
 		this.registerAsset("spaceship_07");    // miniboss (oleada 5)
-		this.registerAsset("spaceship_10");    // boss (oleada 10)
+		this.registerAsset("spaceship_06");    // boss (oleada 10)
 		this.registerAsset("explosion_sheet"); // spritesheet de explosión
 		// endregion
 
