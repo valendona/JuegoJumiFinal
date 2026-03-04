@@ -84,6 +84,7 @@ public class VictoryHUD {
         int panelH = 320;
         int panelX = (viewW - panelW) / 2;
         int panelY = (viewH - panelH) / 2;
+        int cx     = panelX + panelW / 2;
 
         // Sombra
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.3f * a));
@@ -207,7 +208,6 @@ public class VictoryHUD {
 
     private void drawStatRow(Graphics2D g, int panelX, int y, int panelW,
                              String label, String value, Color valueColor, float a) {
-        int cx = panelX + panelW / 2;
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, a));
         g.setColor(new Color(255, 255, 255, 8));
         g.fillRoundRect(panelX + 30, y - 14, panelW - 60, 20, 6, 6);
